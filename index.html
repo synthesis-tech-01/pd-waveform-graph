@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>オシロ波形データ重ね合わせ表示ビューア</title>
+    <!-- Chart.js と ズームプラグインの読み込み -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #fcfcfc; color: #333; }
+        h1 { font-size: 22px; margin-bottom: 15px; }
+        
+        #drop-zone {
+            width: 80%; max-width: 600px; height: 120px;
+            border: 3px dashed #007bff; border-radius: 10px;
+            margin: 0 auto 15px; display: flex;
+            align-items: center; justify-content: center;
+            color: #555; background-color: #f8f9fa; cursor: pointer;
+            transition: all 0.2s ease;
+            font-weight: bold; line-height: 1.6;
+        }
+        #drop-zone.dragover { background-color: #e2e6ea; border-color: #0056b3; transform: scale(1.01); }
+        
+        #file-list-container { text-align: left; max-width: 600px; margin: 0 auto 15px; background: #fff; padding: 10px 15px; border-radius: 5px; border: 1px solid #ddd; }
+        #file-list-container h3 { margin-top: 0; font-size: 14px; color: #444; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+        #ul-file-list { padding-left: 0; list-style: none; margin: 0; max-height: 100px; overflow-y: auto; font-size: 13px; }
+        #ul-file-list li { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; padding: 3px 6px; background: #f8f9fa; border-radius: 4px; }
+        
+        .color-indicator { width: 12px; height: 12px; display: inline-block; margin-right: 8px; border-radius: 2px; }
+        .delete-btn { background-color: #dc3545; color: white; border: none; border-radius: 3px; padding: 2px 6px; font-size: 11px; cursor: pointer; }
+        .delete-btn:hover { background-color: #c82333; }
+
+        .controls { margin-bottom: 15px; }
+        button.action-btn { padding: 8px 16px; font-size: 14px; font-weight: bold; color: #fff; background-color: #28a745; border: none; border-radius: 4px; cursor: pointer; margin: 0 5px; }
+        button.action-btn:hover { background-color: #218838; }
+        button#reset-zoom-btn { background-color: #6c757d; }
+        button#reset-zoom-btn:hover { background-color: #5a6268; }
+
+        /* グラフ表示エリア */
+        #chart-container {
+            width: 90%; max-width: 900px; height: 450px;
+            margin: 0 auto; background: #fff; padding: 15px;
+            border-radius: 8px; border: 1px solid #ccc; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        .hint { font-size: 12px; color: #666; margin-top: 8px; }
+    </style>
+</head>
+<body>
+
+    <h1>オシロスコープ 波形データ重ね合わせビューア</h1>
+    <div id="drop-zone">ここにオシロのCSVファイルを<br>ドラッグ＆ドロップしてください</div>
+    
+    <div id="file-list-container">
+        <h3>読み込み済みファイル一覧:</h3>
+        <ul id="ul-file-list"></ul>
+    </div>
+
+    <div class="controls">
+        <button id="plot-btn" class="action-btn">波形を重ねて描画</button>
+        <button id="reset-zoom-btn" class="action-btn">ズームリセット</button>
+    </div>
+
+    <div id="chart-container">
+        <canvas id="waveformChart"></canvas>
+    </div>
+    <div class="hint">💡 グラフ内をマウスでドラッグ＆ドロップ（矩形選択）すると、そのエリアを拡大表示できます。</div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const ulFileList = document.getElementById('ul-file-list');
+        const plotBtn = document.getElementById('plot-btn');
+        const resetZoomBtn = document.getElementById('reset-zoom-btn');
+        
+        let loadedFiles = []; // { name, data: [{x, y}, ...], color }
+        let waveformChart = null;
+
+        // 自動割り当て用の色パレット
+        const colorPalette = [
+            '#007bff', '#dc3545', '#28a745', '#ffc107', 
+            '#17a2b8', '#6f42c1', '#fd7e14', '#20c997', '#e83e8c'
+        ];
+
+        // ドラッグオーバー演出
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('dragover'); });
+
+        // ドロップ処理
+        dropZone.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+
+            const files = Array.from(e.dataTransfer.files).filter(file => 
+                file.name.toLowerCase().endsWith('.csv') || file.type === 'text/csv'
+            );
+
+            if (files.length === 0) {
+                alert('有効なCSVファイルを選択してください。');
+                return;
+            }
+
+            for (const file of files) {
+                try {
+                    const text = await file.text();
+                    const parsedData = parseYokogawaCSV(text);
+                    
+                    if (parsedData.length === 0) {
+                        alert(`ファイル "${file.name}" から波形データを読み込めませんでした。フォーマットを確認してください。`);
+                        continue;
+                    }
+
+                    const assignedColor = colorPalette[loadedFiles.length % colorPalette.length];
+                    loadedFiles.push({
+                        name: file.name,
+                        data: parsedData,
+                        color: assignedColor
+                    });
+                } catch (err) {
+                    console.error(err);
+                    alert(`ファイル "${file.name}" の読み込みに失敗しました。`);
+                }
+            }
+
+            updateFileList();
+            updateChart();
+        });
+
+        // 横河製オシロのCSVパース用関数（簡易・汎用型）
+        function parseYokogawaCSV(text) {
+            const lines = text.split(/\r\n|\n/);
+            const data = [];
+            
+            for (let line of lines) {
+                if (!line.trim()) continue;
+                // カンマ区切りで分割
+                const cols = line.split(',').map(c => c.trim());
+                
+                // 数値データ行かどうかの判定（先頭2カラムが数値として解釈できるか）
+                if (cols.length >= 2) {
+                    const x = parseFloat(cols[0]);
+                    const y = parseFloat(cols[1]);
+                    
+                    if (!isNaN(x) && !isNaN(y)) {
+                        data.push({ x: x, y: y });
+                    }
+                }
+            }
+            return data;
+        }
+
+        // ファイルリストのUI更新
+        function updateFileList() {
+            ulFileList.innerHTML = '';
+            loadedFiles.forEach((fileObj, index) => {
+                const li = document.createElement('li');
+                
+                const leftDiv = document.createElement('div');
+                leftDiv.style.display = 'flex';
+                leftDiv.style.alignItems = 'center';
+
+                const colorIndicator = document.createElement('span');
+                colorIndicator.className = 'color-indicator';
+                colorIndicator.style.backgroundColor = fileObj.color;
+
+                const span = document.createElement('span');
+                span.textContent = `${fileObj.name} (${fileObj.data.length} pts)`;
+
+                leftDiv.appendChild(colorIndicator);
+                leftDiv.appendChild(span);
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.textContent = '削除';
+                deleteBtn.className = 'delete-btn';
+                deleteBtn.addEventListener('click', () => {
+                    loadedFiles.splice(index, 1);
+                    // 色を再割り当て
+                    loadedFiles.forEach((f, i) => { f.color = colorPalette[i % colorPalette.length]; });
+                    updateFileList();
+                    updateChart();
+                });
+
+                li.appendChild(leftDiv);
+                li.appendChild(deleteBtn);
+                ulFileList.appendChild(li);
+            });
+        }
+
+        // Chart.js 初期化＆更新
+        function initChart() {
+            const ctx = document.getElementById('waveformChart').getContext('2d');
+            waveformChart = new Chart(ctx, {
+                type: 'line',
+                data: { datasets: [] },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            title: { display: true, text: 'Time (s)' },
+                            grid: { color: '#e9ecef' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Voltage (V)' },
+                            grid: { color: '#e9ecef' }
+                        }
+                    },
+                    plugins: {
+                        legend: { position: 'top' },
+                        zoom: {
+                            zoom: {
+                                wheel: { enabled: true },
+                                drag: { 
+                                    enabled: true,
+                                    backgroundColor: 'rgba(0, 123, 255, 0.2)',
+                                    borderColor: 'rgba(0, 123, 255, 0.8)',
+                                    borderWidth: 1
+                                },
+                                mode: 'xy',
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateChart() {
+            if (!waveformChart) return;
+
+            waveformChart.data.datasets = loadedFiles.map(fileObj => ({
+                label: fileObj.name,
+                data: fileObj.data,
+                borderColor: fileObj.color,
+                backgroundColor: fileObj.color,
+                borderWidth: 1.5,
+                pointRadius: 0, // データ点が多い場合は0にすると描画が軽くなります
+                tension: 0.1
+            }));
+
+            waveformChart.update();
+        }
+
+        plotBtn.addEventListener('click', () => {
+            updateChart();
+        });
+
+        resetZoomBtn.addEventListener('click', () => {
+            if (waveformChart) {
+                waveformChart.resetZoom();
+            }
+        });
+
+        // ページ読み込み時にグラフを初期化
+        window.addEventListener('load', () => {
+            initChart();
+        });
+    </script>
+</body>
+</html>
