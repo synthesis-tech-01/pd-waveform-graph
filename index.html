@@ -3,9 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multi-CSV Voltage Viewer</title>
+    <title>Multi-CSV Voltage Viewer with Advanced Analysis</title>
     <!-- Chart.js CDN -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js Zoom Plugin CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <style>
         :root {
             --bg-color: #f4f6f9;
@@ -27,7 +29,7 @@
         }
         .container {
             width: 100%;
-            max-width: 900px;
+            max-width: 1100px;
             background: var(--card-bg);
             padding: 2rem;
             border-radius: 12px;
@@ -42,11 +44,11 @@
         .dropzone {
             border: 2px dashed var(--accent-color);
             border-radius: 8px;
-            padding: 2.5rem 2rem;
+            padding: 1.5rem;
             background-color: #f8fbff;
             cursor: pointer;
             transition: background-color 0.2s, border-color 0.2s;
-            margin-top: 1.5rem;
+            margin-top: 1rem;
         }
         .dropzone.dragover {
             background-color: #eef4ff;
@@ -55,40 +57,177 @@
         .dropzone p {
             margin: 0;
             color: #555;
-            font-size: 1rem;
+            font-size: 0.95rem;
         }
         #status {
-            margin-top: 1rem;
+            margin-top: 0.8rem;
             font-size: 0.9rem;
             color: #666;
         }
+        .main-layout {
+            display: flex;
+            gap: 1.5rem;
+            margin-top: 1rem;
+            text-align: left;
+        }
+        .sidebar {
+            flex: 1;
+            background: #fafbfc;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1rem;
+            max-height: 450px;
+            overflow-y: auto;
+        }
+        .sidebar h3 {
+            font-size: 1rem;
+            margin-top: 0;
+            margin-bottom: 0.8rem;
+            color: #444;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.4rem;
+        }
+        .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            margin-bottom: 0.5rem;
+            background: #fff;
+            padding: 0.4rem 0.6rem;
+            border-radius: 4px;
+            border: 1px solid #eee;
+        }
+        .file-item label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+        }
+        .color-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+            display: inline-block;
+            flex-shrink: 0;
+        }
+        .chart-area {
+            flex: 3;
+            display: flex;
+            flex-direction: column;
+        }
+        .controls {
+            margin-top: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .btn-group {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .btn {
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 0.5rem 0.8rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: opacity 0.2s;
+        }
+        .btn:hover {
+            opacity: 0.9;
+        }
+        .btn-calc {
+            background-color: #8e44ad;
+        }
+        .btn-reset {
+            background-color: #e74c3c;
+        }
+        .btn-clear {
+            background-color: #7f8c8d;
+        }
         .chart-container {
             position: relative;
-            margin-top: 2rem;
             width: 100%;
             height: 400px;
+        }
+        select {
+            padding: 0.3rem;
+            font-size: 0.85rem;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>複数CSV 電圧データ比較ビューア</h1>
-        <p>複数のCSVファイルをまとめて枠内にドラッグ＆ドロップしてください（73行目以降の2列目を同期表示します）。</p>
+        <h1>複数CSV 電圧データ比較・解析ビューア</h1>
+        <p>CSVファイルをドロップ。サイドバーのチェックボックスでファイルや演算線の表示を自在に切り替えられます。</p>
         
         <div id="dropzone" class="dropzone">
-            <p>ここに複数のCSVファイルをドラッグ＆ドロップ</p>
+            <p>ここにCSVファイルをドラッグ＆ドロップ（追加可能）</p>
         </div>
         <div id="status"></div>
 
-        <div class="chart-container">
-            <canvas id="voltageChart"></canvas>
+        <div class="main-layout">
+            <!-- 凡例・ファイル管理サイドバー -->
+            <div class="sidebar">
+                <h3>凡例・レイヤー一覧</h3>
+                <div id="fileListContainer">
+                    <p style="color: #888; font-size: 0.85rem; text-align: center;">データ未読込</p>
+                </div>
+            </div>
+
+            <!-- グラフエリア -->
+            <div class="chart-area">
+                <div class="chart-container">
+                    <canvas id="voltageChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <div class="btn-group">
+                <button id="calcAvgBtn" class="btn btn-calc">全線平均線</button>
+                <div style="display:flex; align-items:center; gap:0.3rem; font-size:0.85rem;">
+                    <span>基準:</span>
+                    <select id="baseFileSelect">
+                        <option value="">(選択)</option>
+                    </select>
+                </div>
+                <button id="calcBaseSumBtn" class="btn btn-calc">基準＋選択線</button>
+                <button id="calcBaseDiffBtn" class="btn btn-calc">基準－選択線</button>
+            </div>
+            <div class="btn-group">
+                <button id="clearBtn" class="btn btn-clear">全クリア</button>
+                <button id="resetZoomBtn" class="btn btn-reset">ズームリセット</button>
+            </div>
         </div>
     </div>
 
     <script>
         const dropzone = document.getElementById('dropzone');
         const statusDiv = document.getElementById('status');
+        const resetZoomBtn = document.getElementById('resetZoomBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const calcAvgBtn = document.getElementById('calcAvgBtn');
+        const calcBaseSumBtn = document.getElementById('calcBaseSumBtn');
+        const calcBaseDiffBtn = document.getElementById('calcBaseDiffBtn');
+        const fileListContainer = document.getElementById('fileListContainer');
+        const baseFileSelect = document.getElementById('baseFileSelect');
+        
         let chartInstance = null;
+        let allFilesData = []; 
+        let calculatedDatasets = []; // { label, points, color, visible }
 
         const palette = [
             '#0066cc', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6', 
@@ -115,53 +254,61 @@
             const files = dt.files;
             if (files.length === 0) return;
 
-            statusDiv.textContent = `${files.length}個のファイルを読み込み中...`;
+            statusDiv.textContent = `${files.length}個のファイルを追加読み込み中...`;
 
             try {
-                const datasets = [];
-                let maxLength = 0;
-
                 for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
                     const file = files[fileIndex];
                     const text = await file.text();
                     const lines = text.split(/\r?\n/);
 
-                    const voltageData = [];
-                    // 73行目以降 (インデックス72から)
-                    for (let i = 72; i < lines.length; i++) {
-                        const line = lines[i].trim();
-                        if (!line) continue;
-                        const cols = line.split(',');
-                        // 2列目 (インデックス1) を取得
-                        if (cols.length >= 2) {
-                            const val = parseFloat(cols[1]);
-                            if (!isNaN(val)) {
-                                voltageData.push(val);
+                    let hResolution = 1.0;
+                    for (let i = 0; i < Math.min(lines.length, 72); i++) {
+                        const line = lines[i];
+                        if (line.toLowerCase().includes('hresolution')) {
+                            const cols = line.split(',');
+                            for (let c = 0; c < cols.length; c++) {
+                                if (cols[c].trim().toLowerCase() === 'hresolution' && cols[c + 1]) {
+                                    const val = parseFloat(cols[c + 1]);
+                                    if (!isNaN(val)) {
+                                        hResolution = val;
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }
 
-                    if (voltageData.length > maxLength) {
-                        maxLength = voltageData.length;
+                    const rawPoints = [];
+                    let dataIndex = 0;
+                    
+                    for (let i = 72; i < lines.length; i++) {
+                        const line = lines[i].trim();
+                        if (!line) continue;
+                        const cols = line.split(',');
+                        
+                        if (cols.length >= 2) {
+                            const val = parseFloat(cols[1]);
+                            if (!isNaN(val)) {
+                                const timeSec = dataIndex * hResolution;
+                                rawPoints.push({ time: timeSec, value: val });
+                                dataIndex++;
+                            }
+                        }
                     }
 
-                    const color = palette[fileIndex % palette.length];
-                    datasets.push({
-                        label: file.name,
-                        data: voltageData,
-                        borderColor: color,
-                        backgroundColor: color,
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        tension: 0.1
+                    const assignedColor = palette[allFilesData.length % palette.length];
+                    allFilesData.push({
+                        name: file.name,
+                        points: rawPoints,
+                        visible: true,
+                        color: assignedColor
                     });
                 }
 
-                // 共通の時間軸（インデックス）を作成
-                const labels = Array.from({ length: maxLength }, (_, i) => i);
-
-                renderChart(labels, datasets);
-                statusDiv.textContent = `読み込み完了: ${files.length}件のファイルを同期表示しました。`;
+                updateSidebar();
+                updateChart();
+                statusDiv.textContent = `合計 ${allFilesData.length}件のファイルを表示中。`;
 
             } catch (err) {
                 console.error(err);
@@ -169,7 +316,325 @@
             }
         });
 
-        function renderChart(labels, datasets) {
+        clearBtn.addEventListener('click', () => {
+            allFilesData = [];
+            calculatedDatasets = [];
+            if (chartInstance) {
+                chartInstance.destroy();
+                chartInstance = null;
+            }
+            updateSidebar();
+            statusDiv.textContent = 'データをクリアしました。';
+        });
+
+        resetZoomBtn.addEventListener('click', () => {
+            if (chartInstance) {
+                chartInstance.resetZoom();
+            }
+        });
+
+        function updateSidebar() {
+            fileListContainer.innerHTML = '';
+            baseFileSelect.innerHTML = '<option value="">(選択)</option>';
+
+            if (allFilesData.length === 0 && calculatedDatasets.length === 0) {
+                fileListContainer.innerHTML = '<p style="color: #888; font-size: 0.85rem; text-align: center;">データ未読込</p>';
+                return;
+            }
+
+            // CSVファイルセクション
+            if (allFilesData.length > 0) {
+                const header1 = document.createElement('div');
+                header1.style.cssText = 'font-size:0.75rem; font-weight:bold; color:#666; margin-bottom:0.3rem;';
+                header1.textContent = '【CSVファイル】';
+                fileListContainer.appendChild(header1);
+
+                allFilesData.forEach((fileData, index) => {
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'file-item';
+
+                    const label = document.createElement('label');
+                    const chk = document.createElement('input');
+                    chk.type = 'checkbox';
+                    chk.checked = fileData.visible;
+                    chk.addEventListener('change', () => {
+                        fileData.visible = chk.checked;
+                        updateChart();
+                    });
+
+                    const indicator = document.createElement('span');
+                    indicator.className = 'color-indicator';
+                    indicator.style.backgroundColor = fileData.color;
+
+                    const nameSpan = document.createElement('span');
+                    nameSpan.textContent = fileData.name;
+                    nameSpan.title = fileData.name;
+
+                    label.appendChild(chk);
+                    label.appendChild(indicator);
+                    label.appendChild(nameSpan);
+                    itemDiv.appendChild(label);
+                    fileListContainer.appendChild(itemDiv);
+
+                    const option = document.createElement('option');
+                    option.value = index;
+                    option.textContent = fileData.name;
+                    baseFileSelect.appendChild(option);
+                });
+            }
+
+            // 演算解析線セクション
+            if (calculatedDatasets.length > 0) {
+                const header2 = document.createElement('div');
+                header2.style.cssText = 'font-size:0.75rem; font-weight:bold; color:#666; margin-top:0.8rem; margin-bottom:0.3rem;';
+                header2.textContent = '【演算解析線】';
+                fileListContainer.appendChild(header2);
+
+                calculatedDatasets.forEach((calcData) => {
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'file-item';
+
+                    const label = document.createElement('label');
+                    const chk = document.createElement('input');
+                    chk.type = 'checkbox';
+                    chk.checked = calcData.visible;
+                    chk.addEventListener('change', () => {
+                        calcData.visible = chk.checked;
+                        updateChart();
+                    });
+
+                    const indicator = document.createElement('span');
+                    indicator.className = 'color-indicator';
+                    indicator.style.backgroundColor = calcData.color;
+
+                    const nameSpan = document.createElement('span');
+                    nameSpan.textContent = calcData.label;
+                    nameSpan.title = calcData.label;
+
+                    label.appendChild(chk);
+                    label.appendChild(indicator);
+                    label.appendChild(nameSpan);
+                    itemDiv.appendChild(label);
+                    fileListContainer.appendChild(itemDiv);
+                });
+            }
+        }
+
+        function interpolateY(points, targetTime) {
+            if (points.length === 0) return null;
+            if (targetTime <= points[0].time) return points[0].value;
+            if (targetTime >= points[points.length - 1].time) return points[points.length - 1].value;
+
+            let low = 0;
+            let high = points.length - 1;
+            while (high - low > 1) {
+                let mid = Math.floor((low + high) / 2);
+                if (points[mid].time <= targetTime) {
+                    low = mid;
+                } else {
+                    high = mid;
+                }
+            }
+            const p1 = points[low];
+            const p2 = points[high];
+            if (p2.time === p1.time) return p1.value;
+            return p1.value + (p2.value - p1.value) * (targetTime - p1.time) / (p2.time - p1.time);
+        }
+
+        calcAvgBtn.addEventListener('click', () => {
+            const visibleFiles = allFilesData.filter(fd => fd.visible);
+            if (visibleFiles.length === 0) {
+                alert('表示されているファイルがありません。');
+                return;
+            }
+            const basePoints = visibleFiles[0].points;
+            const avgPoints = basePoints.map(p => {
+                let sum = 0;
+                let count = 0;
+                visibleFiles.forEach(fd => {
+                    const val = interpolateY(fd.points, p.time);
+                    if (val !== null) {
+                        sum += val;
+                        count++;
+                    }
+                });
+                return { time: p.time, value: count > 0 ? sum / count : 0 };
+            });
+
+            calculatedDatasets.push({
+                label: '【演算】全線平均',
+                points: avgPoints,
+                color: '#e67e22',
+                visible: true
+            });
+            updateSidebar();
+            updateChart();
+        });
+
+        calcBaseSumBtn.addEventListener('click', () => {
+            const baseIndex = baseFileSelect.value;
+            if (baseIndex === '') {
+                alert('基準となるファイルをセレクトボックスから選択してください。');
+                return;
+            }
+            const baseFile = allFilesData[baseIndex];
+            const visibleOtherFiles = allFilesData.filter((fd, idx) => fd.visible && idx != baseIndex);
+            
+            if (visibleOtherFiles.length === 0) {
+                alert('基準線以外のチェックされた比較ファイルがありません。');
+                return;
+            }
+
+            const targetFile = visibleOtherFiles[0];
+            const sumPoints = baseFile.points.map(p => {
+                const v1 = interpolateY(baseFile.points, p.time);
+                const v2 = interpolateY(targetFile.points, p.time);
+                return { time: p.time, value: (v1 !== null && v2 !== null) ? v1 + v2 : 0 };
+            });
+
+            calculatedDatasets.push({
+                label: `【演算】${baseFile.name} ＋ ${targetFile.name}`,
+                points: sumPoints,
+                color: '#27ae60',
+                visible: true
+            });
+            updateSidebar();
+            updateChart();
+        });
+
+        calcBaseDiffBtn.addEventListener('click', () => {
+            const baseIndex = baseFileSelect.value;
+            if (baseIndex === '') {
+                alert('基準となるファイルをセレクトボックスから選択してください。');
+                return;
+            }
+            const baseFile = allFilesData[baseIndex];
+            const visibleOtherFiles = allFilesData.filter((fd, idx) => fd.visible && idx != baseIndex);
+            
+            if (visibleOtherFiles.length === 0) {
+                alert('基準線以外のチェックされた比較ファイルがありません。');
+                return;
+            }
+
+            const targetFile = visibleOtherFiles[0];
+            const diffPoints = baseFile.points.map(p => {
+                const v1 = interpolateY(baseFile.points, p.time);
+                const v2 = interpolateY(targetFile.points, p.time);
+                return { time: p.time, value: (v1 !== null && v2 !== null) ? v1 - v2 : 0 };
+            });
+
+            calculatedDatasets.push({
+                label: `【演算】${baseFile.name} － ${targetFile.name}`,
+                points: diffPoints,
+                color: '#c0392b',
+                visible: true
+            });
+            updateSidebar();
+            updateChart();
+        });
+
+        function updateChart() {
+            if (allFilesData.length === 0 && calculatedDatasets.length === 0) return;
+
+            let globalMaxTime = 0;
+            let globalMaxVoltage = 0;
+
+            allFilesData.forEach(fileData => {
+                if (!fileData.visible) return;
+                fileData.points.forEach(p => {
+                    if (p.time > globalMaxTime) globalMaxTime = p.time;
+                    if (Math.abs(p.value) > globalMaxVoltage) globalMaxVoltage = Math.abs(p.value);
+                });
+            });
+            calculatedDatasets.forEach(calcData => {
+                if (!calcData.visible) return;
+                calcData.points.forEach(p => {
+                    if (p.time > globalMaxTime) globalMaxTime = p.time;
+                    if (Math.abs(p.value) > globalMaxVoltage) globalMaxVoltage = Math.abs(p.value);
+                });
+            });
+
+            let timeUnit = 's';
+            let timeScaleFactor = 1.0;
+
+            if (globalMaxTime >= 1) {
+                timeUnit = 's';
+                timeScaleFactor = 1.0;
+            } else if (globalMaxTime >= 1e-3) {
+                timeUnit = 'ms';
+                timeScaleFactor = 1e3;
+            } else if (globalMaxTime >= 1e-6) {
+                timeUnit = 'µs';
+                timeScaleFactor = 1e6;
+            } else {
+                timeUnit = 'ns';
+                timeScaleFactor = 1e9;
+            }
+
+            let voltageUnit = 'V';
+            let voltageScaleFactor = 1.0;
+
+            if (globalMaxVoltage >= 1) {
+                voltageUnit = 'V';
+                voltageScaleFactor = 1.0;
+            } else if (globalMaxVoltage >= 1e-3) {
+                voltageUnit = 'mV';
+                voltageScaleFactor = 1e3;
+            } else if (globalMaxVoltage >= 1e-6) {
+                voltageUnit = 'µV';
+                voltageScaleFactor = 1e6;
+            } else if (globalMaxVoltage > 0) {
+                voltageUnit = 'nV';
+                voltageScaleFactor = 1e9;
+            }
+
+            const fileDatasets = allFilesData
+                .filter(fileData => fileData.visible)
+                .map((fileData) => {
+                    const scaledPoints = fileData.points.map(p => ({
+                        x: p.time * timeScaleFactor,
+                        y: p.value * voltageScaleFactor
+                    })).sort((a, b) => a.x - b.x);
+
+                    return {
+                        label: fileData.name,
+                        data: scaledPoints,
+                        borderColor: fileData.color,
+                        backgroundColor: fileData.color,
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        pointHitRadius: 5,
+                        tension: 0.1,
+                        spanGaps: true
+                    };
+                });
+
+            const calcDatasets = calculatedDatasets
+                .filter(calcData => calcData.visible)
+                .map(calcData => {
+                    const scaledPoints = calcData.points.map(p => ({
+                        x: p.time * timeScaleFactor,
+                        y: p.value * voltageScaleFactor
+                    })).sort((a, b) => a.x - b.x);
+
+                    return {
+                        label: calcData.label,
+                        data: scaledPoints,
+                        borderColor: calcData.color,
+                        backgroundColor: calcData.color,
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        pointRadius: 0,
+                        pointHitRadius: 5,
+                        tension: 0.1,
+                        spanGaps: true
+                    };
+                });
+
+            renderChart([...fileDatasets, ...calcDatasets], timeUnit, voltageUnit);
+        }
+
+        function renderChart(datasets, timeUnit, voltageUnit) {
             const ctx = document.getElementById('voltageChart').getContext('2d');
             
             if (chartInstance) {
@@ -179,7 +644,6 @@
             chartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: labels,
                     datasets: datasets
                 },
                 options: {
@@ -191,21 +655,53 @@
                     },
                     scales: {
                         x: {
+                            type: 'linear',
+                            position: 'bottom',
                             title: {
                                 display: true,
-                                text: 'データインデックス (時間軸)'
+                                text: `時間 (${timeUnit})`
                             }
                         },
                         y: {
                             title: {
                                 display: true,
-                                text: '電圧値'
+                                text: `電圧値 (${voltageUnit})`
                             }
                         }
                     },
                     plugins: {
                         legend: {
-                            position: 'top',
+                            display: false 
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(255, 255, 255, 0.85)',
+                            titleColor: '#333333',
+                            bodyColor: '#333333',
+                            borderColor: 'rgba(203, 213, 225, 0.6)',
+                            borderWidth: 1,
+                            padding: 10,
+                            boxPadding: 4
+                        },
+                        zoom: {
+                            zoom: {
+                                drag: {
+                                    enabled: true,
+                                    backgroundColor: 'rgba(0, 102, 204, 0.2)',
+                                    borderColor: 'rgba(0, 102, 204, 0.8)',
+                                    borderWidth: 1
+                                },
+                                wheel: {
+                                    enabled: true,
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'xy',
+                            },
+                            pan: {
+                                enabled: true,
+                                mode: 'xy',
+                            }
                         }
                     }
                 }
